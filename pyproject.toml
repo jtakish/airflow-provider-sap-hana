@@ -15,11 +15,10 @@ classifiers = [
 ]
 
 dependencies = [
-    "apache-airflow>=3.0.0; python_full_version >= '3.13'",
-    "apache-airflow>=2.10.0; python_full_version < '3.13'",
-    "apache-airflow-providers-common-sql>=1.27.3",
+    "apache-airflow>=3.0.6",
+    "apache-airflow-providers-common-sql>=1.27.5",
     "hdbcli>=2.26.18",
-    "sqlalchemy-hana>=3.0.3",
+    "sqlalchemy-hana>=3.0.3,<4",
 ]
 
 [dependency-groups]
