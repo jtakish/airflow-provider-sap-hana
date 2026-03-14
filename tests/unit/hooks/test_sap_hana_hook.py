@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import json
-import warnings
-from collections.abc import Iterator
 from unittest import mock
 
 import importlib_metadata as md
@@ -10,8 +8,8 @@ import pytest
 from hdbcli.dbapi import ProgrammingError
 from sqlalchemy_hana.dialect import RESERVED_WORDS
 
-from airflow.exceptions import AirflowException, AirflowProviderDeprecationWarning
-from airflow.providers.common.compat.version_compat import get_base_airflow_version_tuple
+from airflow.exceptions import AirflowException
+from airflow.providers.common.compat.version_compat import AIRFLOW_V_3_1_PLUS
 from airflow_provider_sap_hana.hooks.hana import SapHanaHook
 
 
@@ -19,9 +17,9 @@ class TestSapHanaHookConnection:
     @pytest.mark.parametrize(
         "hook_database, connection_database, expected_sqlalchemy_url",
         [
-            ("hook_database", None, "hana+hdbcli://user:pass123@hanahost:12345/hook_database"),
-            (None, "connection_database", "hana+hdbcli://user:pass123@hanahost:12345/connection_database"),
-            (None, None, "hana+hdbcli://user:pass123@hanahost:12345"),
+            ("hook_database", None, "hana://user:pass123@hanahost:12345/hook_database"),
+            (None, "connection_database", "hana://user:pass123@hanahost:12345/connection_database"),
+            (None, None, "hana://user:pass123@hanahost:12345"),
         ],
     )
     def test_sqlalchemy_url(
@@ -40,19 +38,19 @@ class TestSapHanaHookConnection:
         [
             (
                 '{"nodeconnecttimeout": "1000"}',
-                "hana+hdbcli://user:pass123@hanahost:12345?nodeconnecttimeout=1000",
+                "hana://user:pass123@hanahost:12345?nodeconnecttimeout=1000",
             ),
             (
                 '{"packetsizelimit": "1073741823"}',
-                "hana+hdbcli://user:pass123@hanahost:12345?packetsizelimit=1073741823",
+                "hana://user:pass123@hanahost:12345?packetsizelimit=1073741823",
             ),
             (
                 '{"prefetch": "true", "cursorholdabilitytype": "rollback"}',
-                "hana+hdbcli://user:pass123@hanahost:12345?cursorholdabilitytype=rollback&prefetch=true",
+                "hana://user:pass123@hanahost:12345?cursorholdabilitytype=rollback&prefetch=true",
             ),
             (
                 '{"databasename": "mock", "chopblanks": "true", "chopblanksinput": "true"}',
-                "hana+hdbcli://user:pass123@hanahost:12345?chopblanks=true&chopblanksinput=true",
+                "hana://user:pass123@hanahost:12345?chopblanks=true&chopblanksinput=true",
             ),
         ],
     )
@@ -69,7 +67,7 @@ class TestSapHanaHookConnection:
 
     def test_get_uri(self, mock_hook):
         uri = mock_hook.get_uri()
-        assert uri == "hana+hdbcli://user:***@hanahost:12345"
+        assert uri == "hana://user:***@hanahost:12345"
 
     @pytest.mark.parametrize(
         "replace_with_primary_key, expected_replace_stmt_format, expected_replace_stmt",
@@ -199,30 +197,6 @@ class TestSapHanaHookConnection:
         else:
             mock_conn.ontrace.assert_called_once_with(hook._log_message, called_with_args)
 
-    # Test will be obsolete in next release
-    @pytest.mark.airflow_deprecation_warning
-    def test_replace_statement_backup_deprecation_warning(self, mock_hook):
-        with pytest.warns(AirflowProviderDeprecationWarning):
-            replace_stmt = mock_hook.replace_statement_format_backup
-        assert replace_stmt == "UPSERT {} {} VALUES ({})"
-
-    # Test will be obsolete in next release
-    @pytest.mark.airflow_deprecation_warning
-    def test_hook_schema_deprecation_warning(self):
-        with pytest.warns(AirflowProviderDeprecationWarning):
-            hook = SapHanaHook(schema="schema")
-        assert hook.database == "schema"
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("error")
-            hook = SapHanaHook(database="database")
-        assert hook.database == "database"
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("error")
-            hook = SapHanaHook()
-        assert hook.database is None
-
 
 class TestSapHanaHook:
     @pytest.mark.parametrize(
@@ -250,22 +224,11 @@ class TestSapHanaHook:
         hook.set_autocommit(mock_conn, autocommit)
         mock_conn.setautocommit.assert_called_once_with(autocommit)
 
-    @mock.patch("airflow_provider_sap_hana.hooks.hana.import_string")
-    def test_get_reserved_words_import_dialect(self, mock_import, mock_hook):
-        hook = mock_hook
-
-        hook.get_reserved_words(hook.dialect_name)
-        mock_import.assert_called_once_with("sqlalchemy_hana.dialect")
-
     def test_reserved_words_equal_sa_hana_reserved_words(self, mock_hook):
         hook = mock_hook
         assert hook.reserved_words == RESERVED_WORDS
 
-    # TODO Remove after logging issues resolved in airflow 3.1.0
-    @pytest.mark.xfail(
-        get_base_airflow_version_tuple() == (3, 1, 0), reason="Logging not working in airflow 3.1"
-    )
-    def test_db_log_messages(self, mock_conn, mock_dml_cursor, mock_hook, mock_insert_values, caplog):
+    def test_db_log_messages(self, mock_conn, mock_dml_cursor, mock_hook, mock_insert_values, caplog, capsys):
         hdbcli_version = md.version("hdbcli")
         connect_message = f"libSQLDBCHDB {hdbcli_version}\nSYSTEM: Airflow\n"
         executemany_message = "::GET ROWS AFFECTED [0xmock00]\nROWS: 10"
@@ -279,15 +242,20 @@ class TestSapHanaHook:
         mock_dml_cursor.executemany.side_effect = hook._log_message(executemany_message)
 
         with caplog.at_level(20):
-            hook.bulk_insert_rows(table="mock", rows=[mock_insert_values()])
+            hook.bulk_insert_rows(table="mock", rows=mock_insert_values)
         hook.get_db_log_messages()
 
         # are they indented 4 spaces and is libSQLDBCHDB on a newline?
         expected_connect_message = f"\n    libSQLDBCHDB {hdbcli_version}\n    SYSTEM: Airflow\n"
         expected_executemany_message = "    ::GET ROWS AFFECTED [0xmock00]\n    ROWS: 10"
 
-        assert expected_connect_message in caplog.text
-        assert expected_executemany_message in caplog.text
+        if AIRFLOW_V_3_1_PLUS:
+            log_text = capsys.readouterr().out
+        else:
+            log_text = caplog.text
+
+        assert expected_connect_message in log_text
+        assert expected_executemany_message in log_text
 
 
 class TestSapHanaResultRowSerialization:
@@ -445,42 +413,8 @@ class TestSapHanaHookStreamRecords:
 
 
 class TestSapHanaHookBulkInsertRows:
-    @pytest.mark.parametrize("is_generator", [True, False])
-    def test_get_sample_row_returns_sample_row_and_copy_original_rows(
-        self, is_generator, mock_hook, mock_insert_values
-    ):
-        hook = mock_hook
-        rows = mock_insert_values(generator=is_generator)
-
-        sample_row, new_rows = hook._get_sample_row(rows)
-        assert sample_row == (
-            "mock1",
-            "mock2",
-        )
-        if is_generator:
-            assert isinstance(new_rows, Iterator)
-            assert len(list(new_rows)) == 20
-        else:
-            assert isinstance(new_rows, list)
-            assert len(new_rows) == 20
-
-    @pytest.mark.parametrize("is_generator", [True, False])
-    @mock.patch("airflow_provider_sap_hana.hooks.hana.tee")
-    def test_get_sample_row_tee_called(self, mock_tee, is_generator, mock_hook, mock_insert_values):
-        hook = mock_hook
-        rows = mock_insert_values(generator=is_generator)
-        mock_tee.return_value = rows, rows
-
-        hook._get_sample_row(rows)
-        if not is_generator:
-            mock_tee.assert_not_called()
-        else:
-            mock_tee.assert_called_once_with(rows, 2)
-
-    @pytest.mark.parametrize("is_generator", [True, False])
     def test_prepare_cursor(
         self,
-        is_generator,
         mock_conn,
         mock_dml_cursor,
         mock_hook,
@@ -489,30 +423,18 @@ class TestSapHanaHookBulkInsertRows:
         hook = mock_hook
         hook.get_conn = mock.Mock(return_value=mock_conn)
         mock_conn.cursor.return_value = mock_dml_cursor
+        rows = mock_insert_values
 
-        rows = mock_insert_values(generator=is_generator)
-        sample_row, new_rows = hook._get_sample_row(rows)
-
-        expected_sql = hook._generate_insert_sql("mock", sample_row, ["mock_col1", "mock_col2"])
-        hook.bulk_insert_rows(table="mock", rows=new_rows, target_fields=["mock_col1", "mock_col2"])
+        expected_sql = hook._generate_insert_sql("mock", rows[0], ["mock_col1", "mock_col2"])
+        hook.bulk_insert_rows(table="mock", rows=rows, target_fields=["mock_col1", "mock_col2"])
         mock_dml_cursor.prepare.assert_called_once_with(expected_sql, newcursor=False)
 
     @pytest.mark.parametrize(
-        "is_generator, commit_every, expected_call_count",
-        [
-            (True, 0, 1),
-            (True, 5, 4),
-            (True, 10, 2),
-            (True, 15, 2),
-            (False, 0, 1),
-            (False, 5, 4),
-            (False, 10, 2),
-            (False, 15, 2),
-        ],
+        "commit_every, expected_call_count",
+        [(0, 1), (5, 4), (10, 2), (15, 2)],
     )
     def test_bulk_insert_rows_batches(
         self,
-        is_generator,
         commit_every,
         expected_call_count,
         mock_conn,
@@ -523,10 +445,9 @@ class TestSapHanaHookBulkInsertRows:
         hook = mock_hook
         hook.get_conn = mock.Mock(return_value=mock_conn)
         mock_conn.cursor.return_value = mock_dml_cursor
+        rows = mock_insert_values
 
-        rows = mock_insert_values(generator=is_generator)
         hook.bulk_insert_rows(table="mock", rows=rows, commit_every=commit_every)
-
         assert mock_dml_cursor.executemanyprepared.call_count == expected_call_count
 
     @pytest.mark.parametrize(
@@ -546,16 +467,11 @@ class TestSapHanaHookBulkInsertRows:
         hook = mock_hook
         hook.get_conn = mock.Mock(return_value=mock_conn)
         mock_conn.cursor.return_value = mock_dml_cursor
-
-        rows = mock_insert_values()
+        rows = mock_insert_values
 
         hook.bulk_insert_rows(table="mock", rows=rows, commit_every=commit_every, autocommit=autocommit)
         assert mock_conn.commit.call_count == expected_call_count
 
-    # TODO Remove after logging issues resolved in airflow 3.1.0
-    @pytest.mark.xfail(
-        get_base_airflow_version_tuple() == (3, 1, 0), reason="Logging not working in airflow 3.1"
-    )
     @pytest.mark.parametrize(
         "commit_every, expected_rowcount", [(0, None), (5, [5, 10, 15, 20]), (10, [10, 20]), (15, [15, 20])]
     )
@@ -568,12 +484,13 @@ class TestSapHanaHookBulkInsertRows:
         mock_insert_values,
         mock_hook,
         caplog,
+        capsys,
     ):
         hook = mock_hook
         hook.get_conn = mock.Mock(return_value=mock_conn)
         mock_conn.cursor.return_value = mock_dml_cursor
 
-        rows = mock_insert_values()
+        rows = mock_insert_values
         with caplog.at_level(20):
             hook.bulk_insert_rows(
                 table="mock",
@@ -581,8 +498,12 @@ class TestSapHanaHookBulkInsertRows:
                 commit_every=commit_every,
                 target_fields=["mock_col1", "mock_col2"],
             )
-        assert "Prepared statement: INSERT INTO mock (mock_col1, mock_col2) VALUES (?,?)" in caplog.messages
+        if AIRFLOW_V_3_1_PLUS:
+            log_text = capsys.readouterr().out
+        else:
+            log_text = caplog.text
+        assert "Prepared statement: INSERT INTO mock (mock_col1, mock_col2) VALUES (?,?)" in log_text
         if expected_rowcount:
             for call in expected_rowcount:
-                assert f"Loaded {call} rows into mock so far" in caplog.messages
-        assert "Done loading. Loaded a total of 20 rows into mock" in caplog.messages
+                assert f"Loaded {call} rows into mock so far" in log_text
+        assert "Done loading. Loaded a total of 20 rows into mock" in log_text

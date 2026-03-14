@@ -1,6 +1,6 @@
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.13.2
+    rev: v0.15.5
     hooks:
       - id: ruff-check
         args: [--fix]
@@ -26,7 +26,7 @@ repos:
       -   id: sync-pre-commit-deps
 
   - repo: https://github.com/asottile/blacken-docs
-    rev: 1.19.1
+    rev: 1.20.0
     hooks:
       - id: blacken-docs
         name: Run black on docs

@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import warnings
 from collections import deque
 from collections.abc import Generator, Iterable, Iterator, Mapping, Sequence
-from contextlib import closing, suppress
+from contextlib import closing
 from datetime import datetime
-from itertools import tee
 from textwrap import indent
 from typing import TYPE_CHECKING, Any, TypeVar
 
@@ -15,12 +13,10 @@ from methodtools import lru_cache
 from more_itertools import chunked
 from sqlalchemy import inspect
 from sqlalchemy.engine.url import URL
-from sqlalchemy.exc import NoSuchModuleError
 
 from airflow.exceptions import AirflowProviderDeprecationWarning
 from airflow.providers.common.sql.hooks.handlers import fetch_one_handler
 from airflow.providers.common.sql.hooks.sql import DbApiHook
-from airflow.utils.module_loading import import_string
 from airflow_provider_sap_hana.hooks.decorators import make_cursor_description_available_immediately
 
 if TYPE_CHECKING:
@@ -55,19 +51,13 @@ class SapHanaHook(DbApiHook):
     supports_executemany = True
     _test_connection_sql = "SELECT 1 FROM dummy"
     _placeholder = "?"
-    sqlalchemy_scheme = "hana+hdbcli"
+    sqlalchemy_scheme = "hana"
     ignore_extra_options = ["databasename"]
 
     def __init__(
         self, *args, replace_with_primary_key: bool = True, enable_db_log_messages: bool = False, **kwargs
     ) -> None:
-        if "schema" in kwargs:
-            warnings.warn(
-                "The 'schema' arg has been renamed to 'database'. 'database' is more informative and also "
-                "avoids confusion with the HANA 'currentSchema' connection argument.",
-                AirflowProviderDeprecationWarning,
-                stacklevel=2,
-            )
+        if kwargs.get("schema"):
             kwargs["database"] = kwargs["schema"]
         self.database = kwargs.pop("database", None)
         super().__init__(*args, **kwargs)
@@ -92,25 +82,11 @@ class SapHanaHook(DbApiHook):
             self._replace_statement_format = replace_stmt
         return self._replace_statement_format
 
-    @property
-    @deprecated(
-        reason=(
-            "The 'replace_statement_format_backup' property will soon be removed. "
-            "Please set the 'replace_with_primary_key' hook parameter to False to UPSERT without the PRIMARY KEY clause"
-        ),
-        category=AirflowProviderDeprecationWarning,
-    )
-    def replace_statement_format_backup(self) -> str:
-        """This is a backup replace statement for working with tables that do not have a primary key."""
-        return "UPSERT {} {} VALUES ({})"
-
     @lru_cache(maxsize=None)
     def get_reserved_words(self, dialect_name: str) -> set[str]:
-        result = set()
-        with suppress(ImportError, ModuleNotFoundError, NoSuchModuleError):
-            dialect_module = import_string(self.sqlalchemy_url.get_dialect().__module__)
-            if hasattr(dialect_module, "RESERVED_WORDS"):
-                result = set(dialect_module.RESERVED_WORDS)
+        from sqlalchemy_hana.dialect import RESERVED_WORDS
+
+        result = set(RESERVED_WORDS)
         self.log.debug("reserved words for '%s': %s", dialect_name, result)
         return result
 
@@ -160,17 +136,11 @@ class SapHanaHook(DbApiHook):
 
         :return: A hdbcli Connection object.
         """
-        connection = self.connection
         sqlalchemy_url = self.sqlalchemy_url
-        conn_args = {
-            "address": connection.host,
-            "user": connection.login,
-            "password": connection.password,
-            "port": connection.port,
-            **sqlalchemy_url.query,
-        }
-        if sqlalchemy_url.database:
-            conn_args["databasename"] = sqlalchemy_url.database
+        conn_args = sqlalchemy_url.translate_connect_args(
+            host="address", username="user", database="databasename"
+        )
+        conn_args.update(sqlalchemy_url.query)
         trace_options = conn_args.pop("traceoptions", "SQL=INFO,FLUSH=ON")
         conn = hdbcli.dbapi.connect(**conn_args)
         if self.enable_db_log_messages:
@@ -260,6 +230,13 @@ class SapHanaHook(DbApiHook):
             return list(map(self._make_resultrow_common, result))
         return self._make_resultrow_common(result)
 
+    @deprecated(
+        reason=(
+            "The 'get_primary_keys' method on the Hook class will soon be deprecated."
+            "Please use the similarly named method on the dialect class."
+        ),
+        category=AirflowProviderDeprecationWarning,
+    )
     def get_primary_keys(self, table: str, schema: str | None = None) -> list[str] | None:
         """
         Get the primary key or primary keys for a given table.
@@ -280,17 +257,6 @@ class SapHanaHook(DbApiHook):
         finally:
             cur.close()
             cur.connection.close()
-
-    @staticmethod
-    def _get_sample_row(rows: Sequence[Any] | Iterator[Any]):
-        if hasattr(rows, "__next__"):
-            rows_orig, rows_copy = tee(rows, 2)
-            sample_row = next(rows_orig)
-            return sample_row, rows_copy
-        if len(rows):
-            sample_row = rows[0]
-            return sample_row, rows
-        return [], rows
 
     def stream_records(
         self, sql: str, parameters: Iterable | Mapping[str, Any] | None = None
@@ -337,12 +303,11 @@ class SapHanaHook(DbApiHook):
         :return: None.
         """
         nb_rows = 0
-        sample_row, rows = self._get_sample_row(rows)
-        sql = self._generate_insert_sql(table, sample_row, target_fields, replace)
         chunksize = None if not commit_every else commit_every
         chunked_serialized_rows = chunked(map(self._serialize_cells, rows), chunksize)
         with self._create_autocommit_connection(autocommit) as conn:
             with closing(conn.cursor()) as cur:
+                sql = self._generate_insert_sql(table, rows[0], target_fields, replace)
                 cur.prepare(sql, newcursor=False)
                 if self.log_sql:
                     self.log.info("Prepared statement: %s", sql)

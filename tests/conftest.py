@@ -53,18 +53,7 @@ def mock_resultrows():
 
 @pytest.fixture
 def mock_insert_values():
-    def _mock_insert_values(generator=False):
-        if not generator:
-            return [("mock1", "mock2") for _ in range(20)]
-        return (
-            (
-                "mock1",
-                "mock2",
-            )
-            for _ in range(20)
-        )
-
-    return _mock_insert_values
+    return [("mock1", "mock2") for _ in range(20)]
 
 
 @pytest.fixture
