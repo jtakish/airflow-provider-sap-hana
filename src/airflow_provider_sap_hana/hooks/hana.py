@@ -5,7 +5,7 @@ from collections.abc import Generator, Iterable, Iterator, Mapping, Sequence
 from contextlib import closing
 from datetime import datetime
 from textwrap import indent
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any
 
 import hdbcli.dbapi
 from deprecated import deprecated
@@ -15,16 +15,15 @@ from sqlalchemy import inspect
 from sqlalchemy.engine.url import URL
 
 from airflow.exceptions import AirflowProviderDeprecationWarning
-from airflow.providers.common.sql.hooks.handlers import fetch_one_handler
 from airflow.providers.common.sql.hooks.sql import DbApiHook
-from airflow_provider_sap_hana.hooks.decorators import make_cursor_description_available_immediately
+from airflow_provider_sap_hana.hooks.handlers import stream_handler
 
 if TYPE_CHECKING:
     from hdbcli.dbapi import Connection as HDBCLIConnection
     from hdbcli.resultrow import ResultRow
     from sqlalchemy_hana.dialect import HANAInspector
 
-T = TypeVar("T")
+    from airflow.providers.common.sql.hooks.sql import T
 
 
 class SapHanaHook(DbApiHook):
@@ -247,34 +246,36 @@ class SapHanaHook(DbApiHook):
         """
         return self.dialect.get_primary_keys(table, schema)
 
-    @make_cursor_description_available_immediately
-    def _stream_records(self, cur):
-        try:
-            row = self._make_common_data_structure(fetch_one_handler(cur))
-            while row:
-                yield row
-                row = self._make_common_data_structure(fetch_one_handler(cur))
-        finally:
-            cur.close()
-            cur.connection.close()
-
+    @deprecated(
+        reason=(
+            "The 'stream_records' method has been replaced by the 'get_records_by_chunks' method. The 'stream_rows'"
+            "method is available for backwards compatibility but will be removed in the next release"
+        ),
+        category=AirflowProviderDeprecationWarning,
+    )
     def stream_records(
         self, sql: str, parameters: Iterable | Mapping[str, Any] | None = None
     ) -> Generator[tuple[Any]]:
+        return self.get_records_by_chunks(sql, parameters, chunksize=1)
+
+    def get_records_by_chunks(
+        self, sql: str, parameters: Iterable | Mapping[str, Any] | None = None, chunksize: int = 10000
+    ) -> Generator[tuple[Any]]:
         """
-        Streams records from SAP HANA, yielding one row at a time.
+        Streams records from SAP HANA, yielding chunks of rows.
 
         This is a custom method to fetch large amounts of records without loading them all into memory at once.
         Each record is passed through the '_make_common_data_structure' method to ensure it is JSON serializable.
         The hook attributes 'descriptions' and 'last_description' are available immediately after executing the
         SQL statement, without having to first call 'next' on the iterator.
 
-        :param sql: The sql statement.
-        :param parameters: The parameters to be bound to the sql statement.
-        :return: An iterator of tuples.
+        :param sql: The SQL statement.
+        :param parameters: The parameters to be bound to the SQL statement.
+        :param chunksize: The number of records per chunk.
+        :return: A generator yielding lists of tuples if chunksize > 1, tuples if chunksize set to 1.
         """
         self.descriptions = []
-        return self._stream_records(sql, parameters)
+        return stream_handler(self, sql, parameters, chunksize)
 
     def bulk_insert_rows(
         self,
@@ -282,6 +283,7 @@ class SapHanaHook(DbApiHook):
         rows: Sequence[Any] | Iterator[Any],
         target_fields: list | None = None,
         commit_every: int = 10000,
+        *,
         replace: bool = False,
         autocommit: bool = True,
     ) -> None:

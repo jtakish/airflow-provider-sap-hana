@@ -329,28 +329,29 @@ class TestSapHanaResultRowSerialization:
         json.dumps(common_result)
 
 
-class TestSapHanaHookStreamRecords:
-    def test_stream_rows_fetchone_not_called_until_next_called_on_generator(
+class TestSapHanaHookGetRecordsByChunks:
+    def test_get_records_by_chunks_fetchone_not_called_until_next_called_on_generator(
         self, mock_conn, mock_cursor, mock_hook
     ):
         hook = mock_hook
         hook.get_conn = mock.Mock(return_value=mock_conn)
         mock_conn.cursor.return_value = mock_cursor
 
-        results = hook._stream_records(mock_conn, mock_cursor)
+        results = hook.get_records_by_chunks("SELECT mock FROM dummy;", chunksize=1)
         mock_cursor.fetchone.assert_not_called()
         next(results)
         mock_cursor.fetchone.assert_called_once()
         list(results)
         assert mock_cursor.fetchone.call_count == 4
 
-    def test_stream_rows_resources_closed_when_cursor_exhausted(self, mock_conn, mock_cursor, mock_hook):
+    def test_get_records_by_chunks_resources_closed_when_cursor_exhausted(
+        self, mock_conn, mock_cursor, mock_hook
+    ):
         hook = mock_hook
         hook.get_conn = mock.Mock(return_value=mock_conn)
         mock_conn.cursor.return_value = mock_cursor
-        mock_cursor.connection = mock_conn
 
-        results = hook._stream_records(mock_conn, mock_cursor)
+        results = hook.get_records_by_chunks("SELECT mock FROM dummy;", chunksize=1)
         list(results)
         mock_cursor.close.assert_called_once()
         mock_conn.close.assert_called_once()
@@ -363,17 +364,16 @@ class TestSapHanaHookStreamRecords:
             (SystemExit, "Lots of things going wrong!"),
         ],
     )
-    def test_stream_rows_resources_closed_on_exception(
+    def test_get_records_by_chunks_resources_closed_on_exception(
         self, exception, message, mock_conn, mock_cursor, mock_hook
     ):
         hook = mock_hook
         hook.get_conn = mock.Mock(return_value=mock_conn)
         mock_conn.cursor.return_value = mock_cursor
-        mock_cursor.connection = mock_conn
 
         mock_cursor.fetchone.side_effect = exception(message)
 
-        results = hook._stream_records("SELECT mock FROM dummy", mock_cursor)
+        results = hook.get_records_by_chunks("SELECT mock FROM dummy;", chunksize=1)
         with pytest.raises(exception):
             next(results)
         mock_cursor.close.assert_called_once()
@@ -384,7 +384,7 @@ class TestSapHanaHookStreamRecords:
         hook.get_conn = mock.Mock(return_value=mock_conn)
         mock_conn.cursor.return_value = mock_cursor
 
-        hook._stream_records(hook, mock_cursor)
+        hook.get_records_by_chunks("SELECT mock FROM dummy;", chunksize=1)
         expected_last_description = (
             ("MOCK_STRING",),
             ("MOCK_INT",),
@@ -406,7 +406,7 @@ class TestSapHanaHookStreamRecords:
         mock_cursor.execute.side_effect = ProgrammingError("Bad SQL statement")
 
         with pytest.raises(ProgrammingError):
-            hook.stream_records("SELECT mock FROM dummy")
+            hook.get_records_by_chunks("SELECT mock FROM dummy")
 
         mock_cursor.close.assert_called_once()
         mock_conn.close.assert_called_once()
