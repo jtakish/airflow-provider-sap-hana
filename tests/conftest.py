@@ -45,9 +45,11 @@ def mock_resultrows():
     epoch_ts_add_week = epoch_ts + datetime.timedelta(days=7)
     column_names = ("MOCK_STRING", "MOCK_INT", "MOCK_FLOAT", "MOCK_DATETIME", "MOCK_NONE")
     return [
-        ResultRow(column_names=column_names, column_values=("test123", 123, 123.00, epoch_ts, None)),
-        ResultRow(column_names=column_names, column_values=("test456", 456, 456.00, epoch_ts_add_day, None)),
-        ResultRow(column_names=column_names, column_values=("test789", 789, 789.00, epoch_ts_add_week, None)),
+        ResultRow(column_names=column_names, column_values=("test111", 111, 111.00, epoch_ts, None)),
+        ResultRow(column_names=column_names, column_values=("test222", 222, 222.00, epoch_ts_add_day, None)),
+        ResultRow(column_names=column_names, column_values=("test333", 333, 333.00, epoch_ts_add_week, None)),
+        ResultRow(column_names=column_names, column_values=("test444", 444, 444.00, epoch_ts_add_day, None)),
+        ResultRow(column_names=column_names, column_values=("test555", 555, 555.00, epoch_ts, None)),
     ]
 
 
@@ -63,6 +65,7 @@ def mock_cursor(mock_resultrows):
     cur.__iter__.return_value = result_iterator
     cur.fetchone.side_effect = lambda: next(result_iterator, None)
     cur.fetchall.side_effect = lambda: list(result_iterator)
+    cur.fetchmany.side_effect = lambda fetchsize: [row for _ in range(fetchsize) if (row := cur.fetchone())]
     cur.description = (
         ("MOCK_STRING",),
         ("MOCK_INT",),

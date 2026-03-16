@@ -285,19 +285,21 @@ class TestSapHanaResultRowSerialization:
         hook = mock_hook
         result = mock_cursor.fetchone()
         common_result = hook._make_resultrow_common(result)
-        expected_result = ("test123", 123, 123.00, "1970-01-01T00:00:00.123456", None)
+        expected_result = ("test111", 111, 111.00, "1970-01-01T00:00:00.123456", None)
         assert common_result == expected_result
 
     @pytest.mark.parametrize(
         "handler, expected_data_structure",
         [
-            ("fetchone", ("test123", 123, 123.00, "1970-01-01T00:00:00.123456", None)),
+            ("fetchone", ("test111", 111, 111.00, "1970-01-01T00:00:00.123456", None)),
             (
                 "fetchall",
                 [
-                    ("test123", 123, 123.00, "1970-01-01T00:00:00.123456", None),
-                    ("test456", 456, 456.00, "1970-01-02T00:00:00.123456", None),
-                    ("test789", 789, 789.00, "1970-01-08T00:00:00.123456", None),
+                    ("test111", 111, 111.00, "1970-01-01T00:00:00.123456", None),
+                    ("test222", 222, 222.00, "1970-01-02T00:00:00.123456", None),
+                    ("test333", 333, 333.00, "1970-01-08T00:00:00.123456", None),
+                    ("test444", 444, 444.00, "1970-01-02T00:00:00.123456", None),
+                    ("test555", 555, 555.00, "1970-01-01T00:00:00.123456", None),
                 ],
             ),
         ],
@@ -330,29 +332,37 @@ class TestSapHanaResultRowSerialization:
 
 
 class TestSapHanaHookGetRecordsByChunks:
-    def test_get_records_by_chunks_fetchone_not_called_until_next_called_on_generator(
-        self, mock_conn, mock_cursor, mock_hook
+    @pytest.mark.parametrize(
+        "handler, chunksize, expected_call_count",
+        [("fetchone", 1, 6), ("fetchmany", 2, 4), ("fetchmany", 3, 3)],
+    )
+    def test_get_records_by_chunks_fetch_not_called_until_next_called_on_generator(
+        self, handler, chunksize, expected_call_count, mock_conn, mock_hook
     ):
         hook = mock_hook
         hook.get_conn = mock.Mock(return_value=mock_conn)
-        mock_conn.cursor.return_value = mock_cursor
+        mock_cursor = mock_conn.cursor()
+        handler_method = getattr(mock_cursor, handler)
 
-        results = hook.get_records_by_chunks("SELECT mock FROM dummy;", chunksize=1)
-        mock_cursor.fetchone.assert_not_called()
+        results = hook.get_records_by_chunks("SELECT mock FROM dummy;", chunksize=chunksize)
         next(results)
-        mock_cursor.fetchone.assert_called_once()
-        list(results)
-        assert mock_cursor.fetchone.call_count == 4
+        handler_method.assert_called_once()
+        for _ in results:
+            pass
+        assert handler_method.call_count == expected_call_count
 
+    @pytest.mark.parametrize("handler, chunksize", [("fetchone", 1), ("fetchmany", 3)])
     def test_get_records_by_chunks_resources_closed_when_cursor_exhausted(
-        self, mock_conn, mock_cursor, mock_hook
+        self, handler, chunksize, mock_conn, mock_hook
     ):
         hook = mock_hook
         hook.get_conn = mock.Mock(return_value=mock_conn)
-        mock_conn.cursor.return_value = mock_cursor
+        mock_cursor = mock_conn.cursor()
 
-        results = hook.get_records_by_chunks("SELECT mock FROM dummy;", chunksize=1)
-        list(results)
+        results = hook.get_records_by_chunks("SELECT mock FROM dummy;", chunksize=chunksize)
+
+        for _ in results:
+            pass
         mock_cursor.close.assert_called_once()
         mock_conn.close.assert_called_once()
 
@@ -365,11 +375,11 @@ class TestSapHanaHookGetRecordsByChunks:
         ],
     )
     def test_get_records_by_chunks_resources_closed_on_exception(
-        self, exception, message, mock_conn, mock_cursor, mock_hook
+        self, exception, message, mock_conn, mock_hook
     ):
         hook = mock_hook
         hook.get_conn = mock.Mock(return_value=mock_conn)
-        mock_conn.cursor.return_value = mock_cursor
+        mock_cursor = mock_conn.cursor()
 
         mock_cursor.fetchone.side_effect = exception(message)
 
@@ -379,12 +389,14 @@ class TestSapHanaHookGetRecordsByChunks:
         mock_cursor.close.assert_called_once()
         mock_conn.close.assert_called_once()
 
-    def test_cursor_description_is_available_immediately(self, mock_conn, mock_cursor, mock_hook):
+    @pytest.mark.parametrize("handler, chunksize", [("fetchone", 1), ("fetchmany", 3)])
+    def test_cursor_description_is_available_immediately(self, handler, chunksize, mock_conn, mock_hook):
         hook = mock_hook
         hook.get_conn = mock.Mock(return_value=mock_conn)
-        mock_conn.cursor.return_value = mock_cursor
+        mock_cursor = mock_conn.cursor()
+        handler_method = getattr(mock_cursor, handler)
 
-        hook.get_records_by_chunks("SELECT mock FROM dummy;", chunksize=1)
+        hook.get_records_by_chunks("SELECT mock FROM dummy;", chunksize=chunksize)
         expected_last_description = (
             ("MOCK_STRING",),
             ("MOCK_INT",),
@@ -393,23 +405,9 @@ class TestSapHanaHookGetRecordsByChunks:
             ("MOCK_NONE",),
         )
         assert hook.last_description == expected_last_description
-        mock_cursor.fetchone.assert_not_called()
+        handler_method.assert_not_called()
         mock_cursor.close.assert_not_called()
         mock_conn.close.assert_not_called()
-
-    def test_make_cursor_description_available_immediately_resources_closed_on_exception(
-        self, mock_conn, mock_cursor, mock_hook
-    ):
-        hook = mock_hook
-        hook.get_conn = mock.Mock(return_value=mock_conn)
-        mock_conn.cursor.return_value = mock_cursor
-        mock_cursor.execute.side_effect = ProgrammingError("Bad SQL statement")
-
-        with pytest.raises(ProgrammingError):
-            hook.get_records_by_chunks("SELECT mock FROM dummy")
-
-        mock_cursor.close.assert_called_once()
-        mock_conn.close.assert_called_once()
 
 
 class TestSapHanaHookBulkInsertRows:

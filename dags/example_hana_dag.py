@@ -2,20 +2,14 @@ from __future__ import annotations
 
 import csv
 
-try:
-    from airflow.sdk import dag, task
-except ImportError:
-    from airflow.decorators import dag, task
-try:
-    from airflow.providers.standard.operators.empty import EmptyOperator
-except ImportError:
-    from airflow.operators.empty import EmptyOperator
-
 from faker import Faker
 from faker.providers import automotive, person
 from pendulum import datetime
 
-from airflow.providers.common.sql.operators.sql import BranchSQLOperator, SQLExecuteQueryOperator
+from airflow.providers.common.sql.decorators.sql import sql_task
+from airflow.providers.common.sql.operators.sql import BranchSQLOperator
+from airflow.providers.standard.operators.empty import EmptyOperator
+from airflow.sdk import dag, task
 from airflow_provider_sap_hana.hooks.hana import SapHanaHook
 
 
@@ -40,10 +34,9 @@ def example_hana_dag():
             AND table_name = 'FAKE_VEHICLE_REGISTRATIONS';""",
     )
 
-    create_table = SQLExecuteQueryOperator(
-        task_id="create_table",
-        conn_id="hana_default",
-        sql="""
+    @sql_task(conn_id="hana_default")
+    def create_table():
+        return """
         CREATE TABLE airflow.fake_vehicle_registrations (
             vin NVARCHAR(17),
             owner_name_first NVARCHAR(30),
@@ -55,8 +48,7 @@ def example_hana_dag():
             country NVARCHAR(2),
             created_at TIMESTAMP,
             PRIMARY KEY (vin)
-          );""",
-    )
+          );"""
 
     do_nothing = EmptyOperator(task_id="do_nothing")
 
@@ -105,20 +97,23 @@ def example_hana_dag():
                 replace=True,
                 autocommit=True,
             )
-
         hook.get_db_log_messages()
 
-    get_rows = SQLExecuteQueryOperator(
-        task_id="get_rows",
-        conn_id="hana_default",
-        show_return_value_in_logs=True,
-        sql="""
+    @sql_task(conn_id="hana_default")
+    def get_rows():
+        return """
         SELECT *
         FROM airflow.fake_vehicle_registrations
-        LIMIT 100;""",
-    )
+        LIMIT 100;
+        """
 
-    check_table_exists >> [create_table, do_nothing] >> create_fake_data() >> insert_into_hana() >> get_rows
+    (
+        check_table_exists
+        >> [create_table(), do_nothing]
+        >> create_fake_data()
+        >> insert_into_hana()
+        >> get_rows()
+    )
 
 
 example_hana_dag()

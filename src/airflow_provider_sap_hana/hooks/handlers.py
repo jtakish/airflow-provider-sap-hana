@@ -1,45 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
-from functools import wraps
 from typing import TYPE_CHECKING, Any
 
 from airflow.providers.common.sql.hooks.handlers import fetch_one_handler
 
 if TYPE_CHECKING:
     from airflow.providers.common.sql.hooks.sql import DbApiHook
-
-
-def make_cursor_description_available_immediately(func: Callable):
-    """
-    Ensure that the cursor description is available immediately after executing the SQL statement.
-
-    The hook attributes 'descriptions' and 'last_description' will be available without having to first call
-    'next' on the generator returned by the 'get_records_by_chunks' method.
-
-    :param func: The function to decorate, typically one that streams rows from a cursor.
-    :return: The function which yields rows from a cursor.
-    """
-
-    @wraps(func)
-    def wrapper(hook: DbApiHook, sql: str, parameters: Iterable, chunksize: int):
-        conn = None
-        cur = None
-        try:
-            conn = hook.get_conn()
-            cur = conn.cursor()
-            hook._run_command(cur, sql, parameters)
-            hook.descriptions.append(cur.description)
-        except Exception as e:
-            if cur:
-                cur.close()
-            if conn:
-                conn.close()
-            raise e
-
-        return func(hook, conn, cur, chunksize)
-
-    return wrapper
 
 
 def fetch_many_handler(cursor, fetchsize: int) -> list[tuple[Any]] | None:
@@ -55,7 +21,6 @@ def fetch_many_handler(cursor, fetchsize: int) -> list[tuple[Any]] | None:
     return None
 
 
-@make_cursor_description_available_immediately
 def stream_handler(hook: DbApiHook, conn: Any, cursor: Any, chunksize: int):
     """
     Yield rows in batches.
@@ -81,10 +46,8 @@ def stream_handler(hook: DbApiHook, conn: Any, cursor: Any, chunksize: int):
         handler = fetch_many_handler
         handler_args = (cursor, chunksize)
     try:
-        results = hook._make_common_data_structure(handler(*handler_args))
-        while results:
+        while results := hook._make_common_data_structure(handler(*handler_args)):
             yield results
-            results = hook._make_common_data_structure(handler(*handler_args))
     finally:
         if cursor:
             cursor.close()

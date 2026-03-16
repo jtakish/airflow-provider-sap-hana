@@ -207,8 +207,8 @@ class SapHanaHook(DbApiHook):
         This is a custom method to make SAP HANA result sets JSON serializable.
         ResultRow objects are not JSON serializable so they must be converted into a tuple.
 
-        :param row: A ResultRow object.
-        :return: A tuple with all 'datetime' values converted to string, or unchanged if they are of any other type
+        :param row: ResultRow object.
+        :return: A common row tuple
         """
         return tuple(map(cls._make_resultrow_cell_serializable, row))
 
@@ -275,7 +275,20 @@ class SapHanaHook(DbApiHook):
         :return: A generator yielding lists of tuples if chunksize > 1, tuples if chunksize set to 1.
         """
         self.descriptions = []
-        return stream_handler(self, sql, parameters, chunksize)
+        conn = None
+        cur = None
+        try:
+            conn = self.get_conn()
+            cur = conn.cursor()
+            self._run_command(cur, sql, parameters)
+            self.descriptions.append(cur.description)
+        except Exception as e:
+            if cur:
+                cur.close()
+            if conn:
+                conn.close()
+            raise e
+        return stream_handler(self, conn, cur, chunksize)
 
     def bulk_insert_rows(
         self,
