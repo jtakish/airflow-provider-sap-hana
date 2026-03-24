@@ -271,7 +271,9 @@ class TestSapHanaResultRowSerialization:
             (1, int),
             (2, float),
             (3, str),
-            (4, type(None)),
+            (4, str),
+            (5, str),
+            (6, type(None)),
         ],
     )
     def test_make_resultrow_cell_serializable(self, result_index, expected_type, mock_cursor, mock_hook):
@@ -285,21 +287,32 @@ class TestSapHanaResultRowSerialization:
         hook = mock_hook
         result = mock_cursor.fetchone()
         common_result = hook._make_resultrow_common(result)
-        expected_result = ("test111", 111, 111.00, "1970-01-01T00:00:00.123456", None)
+        expected_result = (
+            "test111",
+            111,
+            111.00,
+            "1970-01-01T00:00:00.123456",
+            "1970-01-01",
+            "00:00:00",
+            None,
+        )
         assert common_result == expected_result
 
     @pytest.mark.parametrize(
         "handler, expected_data_structure",
         [
-            ("fetchone", ("test111", 111, 111.00, "1970-01-01T00:00:00.123456", None)),
+            (
+                "fetchone",
+                ("test111", 111, 111.00, "1970-01-01T00:00:00.123456", "1970-01-01", "00:00:00", None),
+            ),
             (
                 "fetchall",
                 [
-                    ("test111", 111, 111.00, "1970-01-01T00:00:00.123456", None),
-                    ("test222", 222, 222.00, "1970-01-02T00:00:00.123456", None),
-                    ("test333", 333, 333.00, "1970-01-08T00:00:00.123456", None),
-                    ("test444", 444, 444.00, "1970-01-02T00:00:00.123456", None),
-                    ("test555", 555, 555.00, "1970-01-01T00:00:00.123456", None),
+                    ("test111", 111, 111.00, "1970-01-01T00:00:00.123456", "1970-01-01", "00:00:00", None),
+                    ("test222", 222, 222.00, "1970-01-01T00:00:00.123456", "1970-01-01", "00:00:00", None),
+                    ("test333", 333, 333.00, "1970-01-01T00:00:00.123456", "1970-01-01", "00:00:00", None),
+                    ("test444", 444, 444.00, "1970-01-01T00:00:00.123456", "1970-01-01", "00:00:00", None),
+                    ("test555", 555, 555.00, "1970-01-01T00:00:00.123456", "1970-01-01", "00:00:00", None),
                 ],
             ),
         ],

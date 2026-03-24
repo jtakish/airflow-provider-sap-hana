@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import datetime
+from datetime import date, datetime, time
 from unittest import mock
 
 import importlib_metadata as md
@@ -40,16 +40,39 @@ def mock_hook(mock_connection):
 
 @pytest.fixture
 def mock_resultrows():
-    epoch_ts = datetime.datetime(year=1970, month=1, day=1, hour=0, minute=0, second=0, microsecond=123456)
-    epoch_ts_add_day = epoch_ts + datetime.timedelta(days=1)
-    epoch_ts_add_week = epoch_ts + datetime.timedelta(days=7)
-    column_names = ("MOCK_STRING", "MOCK_INT", "MOCK_FLOAT", "MOCK_DATETIME", "MOCK_NONE")
+    epoch_ts = datetime(year=1970, month=1, day=1, hour=0, minute=0, second=0, microsecond=123456)
+    epoch_date = date(1970, 1, 1)
+    epoch_time = time(0, 0, 0)
+    column_names = (
+        "MOCK_STRING",
+        "MOCK_INT",
+        "MOCK_FLOAT",
+        "MOCK_DATETIME",
+        "MOCK_DATE",
+        "MOCK_TIME",
+        "MOCK_NONE",
+    )
     return [
-        ResultRow(column_names=column_names, column_values=("test111", 111, 111.00, epoch_ts, None)),
-        ResultRow(column_names=column_names, column_values=("test222", 222, 222.00, epoch_ts_add_day, None)),
-        ResultRow(column_names=column_names, column_values=("test333", 333, 333.00, epoch_ts_add_week, None)),
-        ResultRow(column_names=column_names, column_values=("test444", 444, 444.00, epoch_ts_add_day, None)),
-        ResultRow(column_names=column_names, column_values=("test555", 555, 555.00, epoch_ts, None)),
+        ResultRow(
+            column_names=column_names,
+            column_values=("test111", 111, 111.00, epoch_ts, epoch_date, epoch_time, None),
+        ),
+        ResultRow(
+            column_names=column_names,
+            column_values=("test222", 222, 222.00, epoch_ts, epoch_date, epoch_time, None),
+        ),
+        ResultRow(
+            column_names=column_names,
+            column_values=("test333", 333, 333.00, epoch_ts, epoch_date, epoch_time, None),
+        ),
+        ResultRow(
+            column_names=column_names,
+            column_values=("test444", 444, 444.00, epoch_ts, epoch_date, epoch_time, None),
+        ),
+        ResultRow(
+            column_names=column_names,
+            column_values=("test555", 555, 555.00, epoch_ts, epoch_date, epoch_time, None),
+        ),
     ]
 
 

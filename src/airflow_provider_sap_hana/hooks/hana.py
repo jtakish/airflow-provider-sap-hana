@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Generator, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Generator, Iterable, Mapping, Sequence
 from contextlib import closing
-from datetime import datetime
+from datetime import date, datetime, time
 from textwrap import indent
 from typing import TYPE_CHECKING, Any
 
@@ -143,7 +143,7 @@ class SapHanaHook(DbApiHook):
         trace_options = conn_args.pop("traceoptions", "SQL=INFO,FLUSH=ON")
         conn = hdbcli.dbapi.connect(**conn_args)
         if self.enable_db_log_messages:
-            conn.ontrace(self._log_message, trace_options)  # noqa: hdbcli says ontrace takes no arguments but it does
+            conn.ontrace(self._log_message, trace_options)
         return conn
 
     def _log_message(self, message: str) -> None:
@@ -183,19 +183,19 @@ class SapHanaHook(DbApiHook):
     @staticmethod
     def _make_resultrow_cell_serializable(cell: Any) -> Any:
         """
-        Convert a ResultRow datetime value to string.
+        Convert a ResultRow date value to string.
 
         This is a custom method to make SAP HANA result sets JSON serializable. This method differs from the
         DbApiHook method 'serialize_cells' in that this method is intended to work with data exiting SAP HANA via
-        SELECT statements. Datimetime values are converted to str using the datetime 'isoformat' method. All other
+        SELECT statements. Date values are converted to str using the 'isoformat' method. All other
         data types (str, int, float, None) are unchanged.
 
         The DbApiHook method 'serialize_cells' is still called when data is entering SAP HANA via DML statements.
 
         :param cell: The input cell, which can be of any type.
-        :return: The input `cell`, converted to a string if it is a `datetime`, or unchanged if it is of any other type
+        :return: The input `cell`, converted to a string if it is a `datetime`, 'date', or 'time', and unchanged if it is of any other type
         """
-        if isinstance(cell, datetime):
+        if isinstance(cell, (datetime, date, time)):
             return cell.isoformat()
         return cell
 
@@ -225,7 +225,7 @@ class SapHanaHook(DbApiHook):
         """
         if not result:
             return result
-        if isinstance(result, Sequence):
+        if isinstance(result, list):
             return list(map(self._make_resultrow_common, result))
         return self._make_resultrow_common(result)
 
@@ -293,7 +293,7 @@ class SapHanaHook(DbApiHook):
     def bulk_insert_rows(
         self,
         table: str,
-        rows: Sequence[Any] | Iterator[Any],
+        rows: Sequence[Any],
         target_fields: list | None = None,
         commit_every: int = 10000,
         *,
