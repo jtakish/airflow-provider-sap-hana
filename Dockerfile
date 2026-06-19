@@ -1,3 +1,8 @@
-FROM apache/airflow:3.1.8
+ARG IMAGE_NAME=apache/airflow:3.2.2
 
-RUN pip install airflow_provider_sap_hana Faker
+FROM ${IMAGE_NAME}
+
+COPY src/ src/
+COPY pyproject.toml .
+
+RUN uv pip install --no-cache --group example_dag "apache-airflow==${AIRFLOW_VERSION}" .

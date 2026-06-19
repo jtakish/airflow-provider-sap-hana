@@ -2,7 +2,7 @@
 name = "airflow-provider-sap-hana"
 dynamic = ["version"]
 description = "An Airflow provider to connect to SAP HANA"
-requires-python = ">=3.10, <3.14"
+requires-python = ">=3.10, <3.15"
 
 authors = [
     { name = "Jonathan Takish", email = "jonathan.takish@gmail.com" }
@@ -11,14 +11,20 @@ authors = [
 keywords = [ "airflow", "hana", "sap hana", "sap-hana" ]
 classifiers = [
     "Framework :: Apache Airflow",
-    "Framework :: Apache Airflow :: Provider"
+    "Framework :: Apache Airflow :: Provider",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14"
 ]
 
 dependencies = [
-    "apache-airflow>=3.0.6",
+    "apache-airflow>=3.0.6; python_version < '3.14'",
+    "apache-airflow>=3.2.0; python_version == '3.14'",
     "apache-airflow-providers-common-sql>=1.27.5",
     "hdbcli>=2.26.18",
-    "sqlalchemy-hana>=3.0.3,<4",
+    "sqlalchemy-hana>=4.0",
 ]
 
 [dependency-groups]
@@ -26,6 +32,9 @@ dev = [
     "pre-commit>=4.2.0",
     "pytest>=8.4.1",
     "pytest-env>=1.1.5",
+]
+example-dag = [
+    "faker>=40.23.0",
 ]
 
 [build-system]
