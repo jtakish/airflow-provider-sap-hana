@@ -10,17 +10,16 @@ from airflow_provider_sap_hana.hooks.handlers import chunk_handler, fetch_many_h
 class TestFetchmanyHandler:
     @pytest.mark.parametrize("fetchsize", [1, 3, 5000])
     def test_fetch_many_handler(self, fetchsize, mock_cursor):
-        mock_cursor.fetchmany = mock.Mock()
         fetch_many_handler(mock_cursor, fetchsize)
         mock_cursor.fetchmany.assert_called_once_with(fetchsize)
 
     def test_fetch_many_not_called(self, mock_cursor):
-        mock_cursor.fetchmany = mock.Mock()
         mock_cursor.description = None
         fetch_many_handler(mock_cursor, 1)
         mock_cursor.fetchmany.assert_not_called()
 
 
+@pytest.mark.filterwarnings("ignore:.*max_num_rendered_ti_fields_per_task.*:DeprecationWarning")
 class TestChunkHandler:
     def test_stream_handler_fetch_one(self, mock_hook, mock_conn):
         hook = mock_hook

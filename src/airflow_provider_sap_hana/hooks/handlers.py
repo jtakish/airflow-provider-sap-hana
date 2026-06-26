@@ -37,7 +37,7 @@ def chunk_handler(
     ensure both resources are closed.
     :param cursor: A DBAPI cursor.
     :param chunksize: The number of records to return per chunk.
-    :return: A generator yielding lists of tuples if chunksize > 1, tuples if chunksize set to 1.
+    :return: A generator yielding lists of tuples.
     """
     nb_rows = 0
     make_common_data_structure = getattr(hook, "_make_common_data_structure")

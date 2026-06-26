@@ -3,7 +3,7 @@ from __future__ import annotations
 from airflow_provider_sap_hana import __version__
 
 
-def get_provider_info():
+def get_provider_info() -> dict:
     return {
         "package-name": "airflow-provider-sap-hana",
         "name": "SAP HANA Airflow Provider",

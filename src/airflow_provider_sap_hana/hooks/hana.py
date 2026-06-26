@@ -1,28 +1,27 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Generator, Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import closing
-from datetime import date, datetime, time
+from datetime import time
 from textwrap import indent
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import hdbcli.dbapi
-from deprecated import deprecated
 from methodtools import lru_cache
-from more_itertools import chunked
+from more_itertools import chunked, peekable
 from sqlalchemy import inspect
 from sqlalchemy.engine.url import URL
 
-from airflow.exceptions import AirflowProviderDeprecationWarning
 from airflow.providers.common.sql.hooks.sql import DbApiHook
-from airflow_provider_sap_hana.hooks.handlers import stream_handler
+from airflow_provider_sap_hana.hooks.handlers import chunk_handler
 
 if TYPE_CHECKING:
-    from hdbcli.dbapi import Connection as HDBCLIConnection
+    from hdbcli.dbapi import Connection as HDBCLIConnection, Cursor
     from hdbcli.resultrow import ResultRow
     from sqlalchemy_hana.dialect import HANAInspector
 
+    from airflow.providers.common.compat.sdk import Connection
     from airflow.providers.common.sql.hooks.sql import T
 
 
@@ -64,6 +63,7 @@ class SapHanaHook(DbApiHook):
         self.enable_db_log_messages = enable_db_log_messages
         self.db_log_messages: deque = deque(maxlen=50)
         self._sqlalchemy_url = None
+        self._replace_statement_format = None
 
     @property
     def replace_statement_format(self) -> str:
@@ -92,7 +92,7 @@ class SapHanaHook(DbApiHook):
     @property
     def sqlalchemy_url(self) -> URL:
         if not self._sqlalchemy_url:
-            connection = self.connection
+            connection: Connection = self.connection
             query = {}
             for key, val in self.connection_extra_lower.items():
                 if key not in self.ignore_extra_options:
@@ -120,9 +120,9 @@ class SapHanaHook(DbApiHook):
         :return: A HANAInspector object.
         """
         engine = self.get_sqlalchemy_engine()
-        return inspect(engine)
+        return cast("HANAInspector", inspect(engine))
 
-    def get_uri(self):
+    def get_uri(self) -> str:
         return self.sqlalchemy_url.render_as_string(hide_password=True)
 
     def get_conn(self) -> HDBCLIConnection:
@@ -187,20 +187,20 @@ class SapHanaHook(DbApiHook):
 
         This is a custom method to make SAP HANA result sets JSON serializable. This method differs from the
         DbApiHook method 'serialize_cells' in that this method is intended to work with data exiting SAP HANA via
-        SELECT statements. Date values are converted to str using the 'isoformat' method. All other
+        SELECT statements. Time values are converted to str using the 'isoformat' method. All other
         data types (str, int, float, None) are unchanged.
 
         The DbApiHook method 'serialize_cells' is still called when data is entering SAP HANA via DML statements.
 
         :param cell: The input cell, which can be of any type.
-        :return: The input `cell`, converted to a string if it is a `datetime`, 'date', or 'time', and unchanged if it is of any other type
+        :return: The input `cell`, converted to a string if it is of 'time' type and unchanged if it is of any other type
         """
-        if isinstance(cell, (datetime, date, time)):
+        if isinstance(cell, time):
             return cell.isoformat()
         return cell
 
     @classmethod
-    def _make_resultrow_common(cls, row: ResultRow) -> tuple:
+    def _make_resultrow_common(cls, row: ResultRow) -> tuple[Any, ...]:
         """
         Convert a ResultRow into a common tuple.
 
@@ -212,7 +212,7 @@ class SapHanaHook(DbApiHook):
         """
         return tuple(map(cls._make_resultrow_cell_serializable, row))
 
-    def _make_common_data_structure(self, result: T | Sequence[T]) -> tuple | list[tuple] | None:
+    def _make_common_data_structure(self, result: T | Sequence[T]) -> tuple | list[tuple]:
         """
         Override the DbApiHook '_make_common_data_structure' method.
 
@@ -224,43 +224,14 @@ class SapHanaHook(DbApiHook):
         :return: A list of tuples if the 'fetchall' handler is used. A single tuple if the 'fetchone' handler is used.
         """
         if not result:
-            return result
+            return cast("tuple | list[tuple]", result)
         if isinstance(result, list):
             return list(map(self._make_resultrow_common, result))
-        return self._make_resultrow_common(result)
-
-    @deprecated(
-        reason=(
-            "The 'get_primary_keys' method on the Hook class will soon be deprecated."
-            "Please use the similarly named method on the dialect class."
-        ),
-        category=AirflowProviderDeprecationWarning,
-    )
-    def get_primary_keys(self, table: str, schema: str | None = None) -> list[str] | None:
-        """
-        Get the primary key or primary keys for a given table.
-
-        :param table: The table name.
-        :param schema: The schema where the table is located.
-        :return: A list of primary keys or None if the table cannot be found or has no primary keys.
-        """
-        return self.dialect.get_primary_keys(table, schema)
-
-    @deprecated(
-        reason=(
-            "The 'stream_records' method has been replaced by the 'get_records_by_chunks' method. The 'stream_rows'"
-            "method is available for backwards compatibility but will be removed in the next release"
-        ),
-        category=AirflowProviderDeprecationWarning,
-    )
-    def stream_records(
-        self, sql: str, parameters: Iterable | Mapping[str, Any] | None = None
-    ) -> Generator[tuple[Any]]:
-        return self.get_records_by_chunks(sql, parameters, chunksize=1)
+        return self._make_resultrow_common(cast("ResultRow", result))
 
     def get_records_by_chunks(
-        self, sql: str, parameters: Iterable | Mapping[str, Any] | None = None, chunksize: int = 10000
-    ) -> Generator[tuple[Any]]:
+        self, sql: str, parameters: Iterable[Any] | Mapping[str, Any] | None = None, chunksize: int = 10000
+    ) -> Iterator[tuple[Any, ...] | list[tuple[Any, ...]]]:
         """
         Streams records from SAP HANA, yielding chunks of rows.
 
@@ -288,17 +259,18 @@ class SapHanaHook(DbApiHook):
             if conn:
                 conn.close()
             raise e
-        return stream_handler(self, conn, cur, chunksize)
+        return chunk_handler(self, conn, cur, chunksize)
 
     def bulk_insert_rows(
         self,
         table: str,
-        rows: Sequence[Any],
+        rows: Any | Iterable[Any],
         target_fields: list | None = None,
         commit_every: int = 10000,
-        *,
         replace: bool = False,
+        *,
         autocommit: bool = True,
+        **kwargs,
     ) -> None:
         """
         Insert records into SAP HANA using a prepared statement.
@@ -319,10 +291,13 @@ class SapHanaHook(DbApiHook):
         """
         nb_rows = 0
         chunksize = None if not commit_every else commit_every
-        chunked_serialized_rows = chunked(map(self._serialize_cells, rows), chunksize)
+        peekable_rows = peekable(rows)
+        sample_row = peekable_rows.peek()
+        chunked_serialized_rows = chunked(map(self._serialize_cells, peekable_rows), chunksize)
         with self._create_autocommit_connection(autocommit) as conn:
             with closing(conn.cursor()) as cur:
-                sql = self._generate_insert_sql(table, rows[0], target_fields, replace)
+                cur: Cursor
+                sql = self._generate_insert_sql(table, sample_row, target_fields, replace)
                 cur.prepare(sql, newcursor=False)
                 if self.log_sql:
                     self.log.info("Prepared statement: %s", sql)
