@@ -3,20 +3,14 @@ from __future__ import annotations
 from datetime import date, datetime, time
 from unittest import mock
 
-import importlib_metadata as md
 import pytest
 from hdbcli.dbapi import Connection as HDBCLIConnection, Cursor
 from hdbcli.resultrow import ResultRow
-from packaging.version import Version
 
+from airflow import DAG
 from airflow.models.connection import Connection
 from airflow_provider_sap_hana.hooks.hana import SapHanaHook
-
-
-@pytest.fixture
-def is_sqlalchemy_v2():
-    sa_version = Version(md.version("sqlalchemy"))
-    return sa_version.major >= 2
+from airflow_provider_sap_hana.operators.hana import SapHanaInsertRowsOperator
 
 
 @pytest.fixture
@@ -114,3 +108,21 @@ def mock_dml_cursor():
     cur.executemanyprepared.side_effect = lambda values: setattr(cur, "rowcount", len(values))
     cur.description = None
     return cur
+
+
+@pytest.fixture
+def mock_insert_rows_operator(mock_hook):
+    def _mock_insert_rows_operator(**kwargs):
+        dag = DAG(
+            "test_dag",
+            schedule=None,
+            start_date=datetime(2026, 6, 19),
+            render_template_as_native_obj=True,
+        )
+
+        operator = SapHanaInsertRowsOperator(task_id="mock_task", conn_id="hana_mock", dag=dag, **kwargs)
+        operator.get_db_hook = mock.Mock(return_value=mock_hook)
+
+        return operator
+
+    return _mock_insert_rows_operator
