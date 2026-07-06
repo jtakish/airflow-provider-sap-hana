@@ -3,20 +3,12 @@ from __future__ import annotations
 from datetime import date, datetime, time
 from unittest import mock
 
-import importlib_metadata as md
 import pytest
 from hdbcli.dbapi import Connection as HDBCLIConnection, Cursor
 from hdbcli.resultrow import ResultRow
-from packaging.version import Version
 
 from airflow.models.connection import Connection
 from airflow_provider_sap_hana.hooks.hana import SapHanaHook
-
-
-@pytest.fixture
-def is_sqlalchemy_v2():
-    sa_version = Version(md.version("sqlalchemy"))
-    return sa_version.major >= 2
 
 
 @pytest.fixture
