@@ -1,14 +1,32 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+import os
 import csv
-from textwrap import dedent
+
 from faker import Faker
 from faker.providers import automotive, person
 from pendulum import datetime
 
-from airflow.providers.common.sql.decorators.sql import sql_task
-from airflow_provider_sap_hana.operators.hana import SapHanaInsertRowsOperator
-from airflow.sdk import dag, task, get_current_context, ObjectStoragePath
+from airflow.sdk import dag, task, ObjectStoragePath
+from airflow.providers.standard.operators.empty import EmptyOperator
+from airflow.providers.common.sql.operators.sql import (
+    BranchSQLOperator,
+    SQLExecuteQueryOperator,
+    SQLInsertRowsOperator,
+)
+
+if TYPE_CHECKING:
+    from airflow.models.xcom import LazySelectSequence
+
+
+def _read_tmp_csv(tmp_file: LazySelectSequence, **kwargs):
+    for file in tmp_file:
+        file: ObjectStoragePath
+        with file.open() as f:
+            reader = csv.reader(f)
+            yield from reader
+        os.remove(file.path)
 
 
 @dag(
@@ -19,14 +37,47 @@ from airflow.sdk import dag, task, get_current_context, ObjectStoragePath
     catchup=False,
 )
 def example_hana_dag():
+    check_table_exists = BranchSQLOperator(
+        task_id="check_table_exists",
+        conn_id="hana_default",
+        follow_task_ids_if_false=["create_table"],
+        follow_task_ids_if_true=["do_nothing"],
+        sql="""
+        SELECT COUNT(*)
+        FROM sys.tables
+        WHERE
+            schema_name = 'AIRFLOW'
+            AND table_name = 'FAKE_VEHICLE_REGISTRATIONS';""",
+    )
 
-    @task
-    def create_fake_data():
+    create_table = SQLExecuteQueryOperator(
+        task_id="create_table",
+        conn_id="hana_default",
+        sql="""
+        CREATE TABLE airflow.fake_vehicle_registrations (
+            vin NVARCHAR(17),
+            owner_name_first NVARCHAR(30),
+            owner_name_last NVARCHAR(30),
+            address NVARCHAR(100),
+            city NVARCHAR(30),
+            state NVARCHAR(2),
+            postal_code NVARCHAR(20),
+            country NVARCHAR(2),
+            created_at TIMESTAMP,
+            PRIMARY KEY (vin)
+          );""",
+    )
+
+    do_nothing = EmptyOperator(task_id="do_nothing")
+
+    @task(trigger_rule="none_failed_min_one_success", map_index_template="Batch {{ tmp_file_suffix }}")
+    def create_fake_data(tmp_file_suffix: int):
+
         fake = Faker()
         fake.add_provider(automotive)
         fake.add_provider(person)
 
-        base = ObjectStoragePath("/tmp/fake_data.csv")
+        base = ObjectStoragePath(f"/tmp/fake_data_{tmp_file_suffix}.csv")
 
         with base.open(mode="w", encoding="utf-8") as f:
             writer = csv.writer(f)
@@ -46,63 +97,18 @@ def example_hana_dag():
                 )
         return base
 
-    @task
-    def insert_into_hana(tmp_file: ObjectStoragePath, **kwargs):
+    fake_data = create_fake_data.expand(tmp_file_suffix=[n for n in range(1, 11)])
 
-        ctx = get_current_context()
-        task_id = ctx["task"].task_id
-
-        with tmp_file.open(mode="r", encoding="utf-8") as f:
-            data = csv.reader(f)
-            _ = next(data)
-            rows = list(data)
-
-        create_stmt = dedent("""
-            DO
-            BEGIN
-                DECLARE tableExists TINYINT := 0;
-
-                SELECT COUNT(*) INTO tableExists
-                FROM sys.tables
-                WHERE
-                    schema_name = 'AIRFLOW'
-                    AND table_name = 'FAKE_VEHICLE_REGISTRATIONS';
-
-                IF tableExists = 0 THEN EXEC
-                    'CREATE TABLE airflow.fake_vehicle_registrations (
-                        vin NVARCHAR(17),
-                        owner_name_first NVARCHAR(30),
-                        owner_name_last NVARCHAR(30),
-                        address NVARCHAR(100),
-                        city NVARCHAR(30),
-                        state NVARCHAR(2),
-                        postal_code NVARCHAR(20),
-                        country NVARCHAR(2),
-                        created_at TIMESTAMP,
-                        PRIMARY KEY (vin)
-                      )';
-                END IF;
-            END;""")
-        operator = SapHanaInsertRowsOperator(
-            task_id=task_id,
-            conn_id="hana_default",
-            table_name="fake_vehicle_registrations",
-            schema="airflow",
-            rows=rows,
-            insert_args={"replace": True, "commit_every": 10000},
-            preoperator=create_stmt,
-        )
-        operator.execute(ctx)
-
-    @sql_task(conn_id="hana_default")
-    def get_rows():
-        stmt = dedent("""
-            SELECT *
-            FROM airflow.fake_vehicle_registrations
-            LIMIT 100;""")
-        return stmt
-
-    insert_into_hana(create_fake_data()) >> get_rows()
+    insert_into_hana = SQLInsertRowsOperator(
+        task_id="insert_into_hana",
+        conn_id="hana_default",
+        schema="airflow",
+        table_name="fake_vehicle_registrations",
+        rows_processor=_read_tmp_csv,
+        rows=fake_data,
+        insert_args={"replace": True, "fast_executemany": True, "commit_every": 10000},
+    )
+    check_table_exists >> [create_table, do_nothing] >> fake_data >> insert_into_hana
 
 
 example_hana_dag()

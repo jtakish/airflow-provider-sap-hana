@@ -15,7 +15,7 @@ def fetch_many_handler(cursor: Any, fetchsize: int) -> list[tuple[Any, ...]] | N
 
     :param cursor: The cursor holding the result set.
     :param fetchsize: The number of rows to fetch.
-    :return: A list of tuples.
+    :return: A list of tuples or None.
     """
     if cursor.description is not None:
         return cursor.fetchmany(fetchsize)
@@ -28,14 +28,13 @@ def chunk_handler(
     """
     Yield rows in batches.
 
-    This allows you to process large datasets without loading
-    all the data into memory at once. The hook attributes 'descriptions' and 'last_description' will be available without having to first call
-    'next' on the generator returned by the 'get_records_by_chunks' method.
+    This allows for processing large datasets without loading all data into memory.
+    The ``descriptions`` and ``last_description`` attributes of the hook are
+    available immediately after calling this method.
 
-    :param hook: The DbApiHook class instance.
-    :param conn: A connection object. The connection must be passed in as well as the cursor to
-    ensure both resources are closed.
-    :param cursor: A DBAPI cursor.
+    :param hook: The ``DbApiHook`` instance.
+    :param conn: The database connection object.
+    :param cursor: The database cursor.
     :param chunksize: The number of records to return per chunk.
     :return: A generator yielding lists of tuples.
     """

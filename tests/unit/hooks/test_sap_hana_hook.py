@@ -240,7 +240,7 @@ class TestSapHanaHook:
         mock_dml_cursor.executemany.side_effect = hook._log_message(executemany_message)
 
         with caplog.at_level(20):
-            hook.bulk_insert_rows(table="mock", rows=mock_insert_values)
+            hook.insert_rows(table="mock", rows=mock_insert_values)
         hook.get_db_log_messages()
 
         # are they indented 4 spaces and is libSQLDBCHDB on a newline?
@@ -466,7 +466,7 @@ class TestSapHanaHookGetRecordsByChunks:
         mock_conn.close.assert_not_called()
 
 
-class TestSapHanaHookBulkInsertRows:
+class TestSapHanaHookInsertRows:
     def test_prepare_cursor(
         self,
         mock_conn,
@@ -480,17 +480,26 @@ class TestSapHanaHookBulkInsertRows:
         rows = mock_insert_values
 
         expected_sql = hook._generate_insert_sql("mock", rows[0], ["mock_col1", "mock_col2"])
-        hook.bulk_insert_rows(table="mock", rows=rows, target_fields=["mock_col1", "mock_col2"])
+        hook.insert_rows(
+            table="mock", rows=rows, target_fields=["mock_col1", "mock_col2"], fast_executemany=True
+        )
         mock_dml_cursor.prepare.assert_called_once_with(expected_sql, newcursor=False)
 
     @pytest.mark.parametrize(
-        "commit_every, expected_call_count",
-        [(0, 1), (5, 4), (10, 2), (15, 2)],
+        "commit_every, expected_call_count, fast_executemany, cursor_method",
+        [
+            (0, 1, True, "executemanyprepared"),
+            (5, 4, False, "executemany"),
+            (10, 2, True, "executemanyprepared"),
+            (15, 2, False, "executemany"),
+        ],
     )
-    def test_bulk_insert_rows_batches(
+    def test_insert_rows_batches(
         self,
         commit_every,
         expected_call_count,
+        fast_executemany,
+        cursor_method,
         mock_conn,
         mock_dml_cursor,
         mock_insert_values,
@@ -501,8 +510,10 @@ class TestSapHanaHookBulkInsertRows:
         mock_conn.cursor.return_value = mock_dml_cursor
         rows = mock_insert_values
 
-        hook.bulk_insert_rows(table="mock", rows=rows, commit_every=commit_every)
-        assert mock_dml_cursor.executemanyprepared.call_count == expected_call_count
+        hook.insert_rows(
+            table="mock", rows=rows, commit_every=commit_every, fast_executemany=fast_executemany
+        )
+        assert getattr(mock_dml_cursor, cursor_method).call_count == expected_call_count
 
     @pytest.mark.parametrize(
         "autocommit, commit_every, expected_call_count",
@@ -523,13 +534,13 @@ class TestSapHanaHookBulkInsertRows:
         mock_conn.cursor.return_value = mock_dml_cursor
         rows = mock_insert_values
 
-        hook.bulk_insert_rows(table="mock", rows=rows, commit_every=commit_every, autocommit=autocommit)
+        hook.insert_rows(table="mock", rows=rows, commit_every=commit_every, autocommit=autocommit)
         assert mock_conn.commit.call_count == expected_call_count
 
     @pytest.mark.parametrize(
         "commit_every, expected_rowcount", [(0, None), (5, [5, 10, 15, 20]), (10, [10, 20]), (15, [15, 20])]
     )
-    def test_bulk_insert_rows_rowcount_logging(
+    def test_insert_rows_rowcount_logging(
         self,
         commit_every,
         expected_rowcount,
@@ -546,20 +557,19 @@ class TestSapHanaHookBulkInsertRows:
 
         rows = mock_insert_values
         with caplog.at_level(20):
-            hook.bulk_insert_rows(
+            hook.insert_rows(
                 table="mock",
                 rows=rows,
                 commit_every=commit_every,
                 target_fields=["mock_col1", "mock_col2"],
             )
         log_text = capsys.readouterr().out
-        assert "Prepared statement: INSERT INTO mock (mock_col1, mock_col2) VALUES (?,?)" in log_text
         if expected_rowcount:
             for call in expected_rowcount:
                 assert f"Loaded {call} rows into mock so far" in log_text
         assert "Done loading. Loaded a total of 20 rows into mock" in log_text
 
-    def test_bulk_insert_rows_with_iter_and_generator_rows(
+    def test_insert_rows_with_iter_and_generator_rows(
         self, mock_conn, mock_dml_cursor, mock_insert_values, mock_hook
     ):
 
@@ -568,14 +578,14 @@ class TestSapHanaHookBulkInsertRows:
         mock_conn.cursor.return_value = mock_dml_cursor
 
         iter_rows = iter(mock_insert_values)
-        hook.bulk_insert_rows(
+        hook.insert_rows(
             table="mock",
             rows=iter_rows,
             commit_every=5,
         )
 
         gen_rows = (_ for _ in mock_insert_values)
-        hook.bulk_insert_rows(
+        hook.insert_rows(
             table="mock",
             rows=gen_rows,
             commit_every=5,
