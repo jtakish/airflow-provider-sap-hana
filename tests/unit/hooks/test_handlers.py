@@ -21,7 +21,7 @@ class TestFetchmanyHandler:
 
 @pytest.mark.filterwarnings("ignore:.*max_num_rendered_ti_fields_per_task.*:DeprecationWarning")
 class TestChunkHandler:
-    def test_stream_handler_fetch_one(self, mock_hook, mock_conn):
+    def test_chunk_handler_fetch_one(self, mock_hook, mock_conn):
         hook = mock_hook
         hook.get_conn = mock.Mock(return_value=mock_conn)
         mock_cursor = mock_conn.cursor()
@@ -35,7 +35,7 @@ class TestChunkHandler:
         assert mock_cursor.fetchone.call_count == 6
 
     @pytest.mark.parametrize("chunksize, expected_call_count", [(2, 4), (3, 3), (5, 2)])
-    def test_stream_handler_fetch_many(self, chunksize, expected_call_count, mock_hook, mock_conn):
+    def test_chunk_handler_fetch_many(self, chunksize, expected_call_count, mock_hook, mock_conn):
         hook = mock_hook
         hook.get_conn = mock.Mock(return_value=mock_conn)
         mock_cursor = mock_conn.cursor()
@@ -48,7 +48,7 @@ class TestChunkHandler:
             pass
         assert mock_cursor.fetchmany.call_count == expected_call_count
 
-    def test_stream_handler_resources_closed_normal(self, mock_hook, mock_conn):
+    def test_chunk_handler_resources_closed_normal(self, mock_hook, mock_conn):
         hook = mock_hook
         hook.get_conn = mock.Mock(return_value=mock_conn)
         mock_cursor = mock_conn.cursor()
@@ -58,7 +58,7 @@ class TestChunkHandler:
         mock_cursor.close.assert_called_once()
         mock_conn.close.assert_called_once()
 
-    def test_stream_handler_resources_closed_exception(self, mock_hook, mock_conn):
+    def test_chunk_handler_resources_closed_exception(self, mock_hook, mock_conn):
         hook = mock_hook
         hook.get_conn = mock.Mock(return_value=mock_conn)
         mock_cursor = mock_conn.cursor()
