@@ -17,7 +17,7 @@ from airflow.providers.common.sql.hooks.sql import DbApiHook
 from airflow_provider_sap_hana.hooks.handlers import chunk_handler
 
 if TYPE_CHECKING:
-    from hdbcli.dbapi import Connection as HDBCLIConnection, Cursor
+    from hdbcli.dbapi import Connection as HDBCLIConnection, Cursor as HDBCLICursor
     from hdbcli.resultrow import ResultRow
     from sqlalchemy_hana.dialect import HANAInspector
 
@@ -165,7 +165,7 @@ class SapHanaHook(DbApiHook):
         if self.supports_autocommit:
             conn.setautocommit(autocommit)
 
-    def get_autocommit(self, conn: HDBCLIConnection) -> bool | None:
+    def get_autocommit(self, conn: HDBCLIConnection) -> bool:
         """
         Get autocommit setting for the provided connection.
 
@@ -177,7 +177,7 @@ class SapHanaHook(DbApiHook):
         """
         if self.supports_autocommit:
             return conn.getautocommit()
-        return None
+        return False
 
     @staticmethod
     def _make_resultrow_cell_serializable(cell: Any) -> Any:
@@ -263,15 +263,15 @@ class SapHanaHook(DbApiHook):
 
     def insert_rows(
         self,
-        table,
-        rows,
-        target_fields=None,
-        commit_every=1000,
-        replace=False,
+        table: str,
+        rows: Iterable[tuple[Any, ...]],
+        target_fields: Iterable[str] | None = None,
+        commit_every: int = 1000,
+        replace: bool = False,
         *,
-        executemany=False,
-        fast_executemany=False,
-        autocommit=False,
+        executemany: bool = False,
+        fast_executemany: bool = False,
+        autocommit: bool = False,
         **kwargs,
     ):
         """
@@ -300,7 +300,7 @@ class SapHanaHook(DbApiHook):
         sql = self._generate_insert_sql(table, sample_row, target_fields, replace)
         with self._create_autocommit_connection(autocommit) as conn:
             with closing(conn.cursor()) as cur:
-                cur: Cursor
+                cur = cast("HDBCLICursor", cur)
                 if fast_executemany:
                     cur.prepare(sql, newcursor=False)
                     if self.log_sql:
