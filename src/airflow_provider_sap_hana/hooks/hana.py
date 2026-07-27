@@ -300,7 +300,7 @@ class SapHanaHook(DbApiHook):
         sql = self._generate_insert_sql(table, sample_row, target_fields, replace)
         with self._create_autocommit_connection(autocommit) as conn:
             with closing(conn.cursor()) as cur:
-                cur = cast("HDBCLICursor", cur)
+                cur: HDBCLICursor
                 if fast_executemany:
                     cur.prepare(sql, newcursor=False)
                     if self.log_sql:
