@@ -5,7 +5,7 @@ from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import closing
 from datetime import time
 from textwrap import indent
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 import hdbcli.dbapi
 from methodtools import lru_cache
@@ -49,7 +49,7 @@ class SapHanaHook(DbApiHook):
     _test_connection_sql = "SELECT 1 FROM dummy"
     _placeholder = "?"
     sqlalchemy_scheme = "hana"
-    ignore_extra_options = ["databasename"]
+    ignore_extra_options: ClassVar[list[str]] = ["databaseName"]
 
     def __init__(
         self, *args, replace_with_primary_key: bool = True, enable_db_log_messages: bool = False, **kwargs
@@ -93,9 +93,9 @@ class SapHanaHook(DbApiHook):
         if not self._sqlalchemy_url:
             connection: Connection = self.connection
             query = {}
-            for key, val in self.connection_extra_lower.items():
+            for key, val in self.connection_extra.items():
                 if key not in self.ignore_extra_options:
-                    query[key] = val
+                    query[key] = str(val)
             self._sqlalchemy_url = URL.create(
                 drivername=self.sqlalchemy_scheme,
                 host=connection.host,
@@ -135,10 +135,10 @@ class SapHanaHook(DbApiHook):
         """
         sqlalchemy_url = self.sqlalchemy_url
         conn_args = sqlalchemy_url.translate_connect_args(
-            host="address", username="user", database="databasename"
+            host="address", username="user", database="databaseName"
         )
         conn_args.update(sqlalchemy_url.query)
-        trace_options = conn_args.pop("traceoptions", "SQL=INFO,FLUSH=ON")
+        trace_options = conn_args.pop("traceOptions", "SQL=INFO,FLUSH=ON")
         conn = hdbcli.dbapi.connect(**conn_args)
         if self.enable_db_log_messages:
             conn.ontrace(self._log_message, trace_options)
@@ -253,12 +253,12 @@ class SapHanaHook(DbApiHook):
             cur = conn.cursor()
             self._run_command(cur, sql, parameters)
             self.descriptions.append(cur.description)
-        except Exception as e:
+        except Exception:
             if cur:
                 cur.close()
             if conn:
                 conn.close()
-            raise e
+            raise
         return chunk_handler(self, conn, cur, chunksize)
 
     def insert_rows(
@@ -298,23 +298,22 @@ class SapHanaHook(DbApiHook):
         sample_row = peekable_rows.peek()
         chunked_serialized_rows = chunked(map(self._serialize_cells, peekable_rows), chunksize)
         sql = self._generate_insert_sql(table, sample_row, target_fields, replace)
-        with self._create_autocommit_connection(autocommit) as conn:
-            with closing(conn.cursor()) as cur:
-                cur: HDBCLICursor
-                if fast_executemany:
-                    cur.prepare(sql, newcursor=False)
-                    if self.log_sql:
-                        self.log.info("Prepared statement: %s", sql)
+        with self._create_autocommit_connection(autocommit) as conn, closing(conn.cursor()) as cur:
+            cur: HDBCLICursor
+            if fast_executemany:
+                cur.prepare(sql, newcursor=False)
+                if self.log_sql:
+                    self.log.info("Prepared statement: %s", sql)
 
-                for chunk in chunked_serialized_rows:
-                    if fast_executemany:
-                        cur.executemanyprepared(chunk)
-                    else:
-                        cur.executemany(sql, chunk)
-                    if not autocommit:
-                        conn.commit()
-                    nb_rows += cur.rowcount
-                    self.log.info("Loaded %s rows into %s so far", nb_rows, table)
+            for chunk in chunked_serialized_rows:
+                if fast_executemany:
+                    cur.executemanyprepared(chunk)
+                else:
+                    cur.executemany(sql, chunk)
+                if not autocommit:
+                    conn.commit()
+                nb_rows += cur.rowcount
+                self.log.info("Loaded %s rows into %s so far", nb_rows, table)
         self.log.info("Done loading. Loaded a total of %s rows into %s", nb_rows, table)
 
     def get_db_log_messages(self, conn: None = None) -> None:
