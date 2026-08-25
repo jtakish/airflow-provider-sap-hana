@@ -39,15 +39,14 @@ def chunk_handler(
     :return: A generator yielding lists of tuples.
     """
     nb_rows = 0
-    make_common_data_structure = getattr(hook, "_make_common_data_structure")
-    log = getattr(hook, "log")
+    make_common_data_structure = hook._make_common_data_structure
+    log = hook.log
     try:
         while results := make_common_data_structure(fetch_many_handler(cursor, chunksize)):
             nb_rows += len(results)
             log.info("Fetched %s rows so far", nb_rows)
             yield results
-        else:
-            log.info("Done fetching. Fetched %s total rows", nb_rows)
+        log.info("Done fetching. Fetched %s total rows", nb_rows)
     finally:
         if cursor:
             cursor.close()

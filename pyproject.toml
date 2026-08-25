@@ -97,4 +97,5 @@ fixture-parentheses = false
 "tests/**/*.py" = [
     "S101", # asserts allowed in tests...
     "D101", # Missing docstring in public class
+    "DTZ001", # TZInfo required for datetime objects
 ]

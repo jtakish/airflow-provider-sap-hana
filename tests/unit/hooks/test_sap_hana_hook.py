@@ -37,28 +37,32 @@ class TestSapHanaHookConnection:
         assert hook.sqlalchemy_url.render_as_string(False) == expected_sqlalchemy_url
 
     @pytest.mark.parametrize(
-        "extra, expected_sqlalchemy_url",
+        "mock_connection, expected_sqlalchemy_url",  # Match the fixture name here
         [
             (
-                '{"nodeconnecttimeout": "1000"}',
-                "hana://user:pass123@hanahost:12345?nodeconnecttimeout=1000",
+                '{"nodeConnectTimeout": "1000"}',
+                "hana://user:pass123@hanahost:12345?nodeConnectTimeout=1000",
             ),
             (
-                '{"packetsizelimit": "1073741823"}',
-                "hana://user:pass123@hanahost:12345?packetsizelimit=1073741823",
+                '{"packetSizeLimit": "1073741823"}',
+                "hana://user:pass123@hanahost:12345?packetSizeLimit=1073741823",
             ),
             (
-                '{"prefetch": "true", "cursorholdabilitytype": "rollback"}',
-                "hana://user:pass123@hanahost:12345?cursorholdabilitytype=rollback&prefetch=true",
+                '{"prefetch": "true", "cursorHoldabilityType": "rollback"}',
+                "hana://user:pass123@hanahost:12345?cursorHoldabilityType=rollback&prefetch=true",
             ),
             (
-                '{"databasename": "mock", "chopblanks": "true", "chopblanksinput": "true"}',
-                "hana://user:pass123@hanahost:12345?chopblanks=true&chopblanksinput=true",
+                '{"databaseName": "mock", "chopBlanks": "true", "chopBlanksInput": "true"}',
+                "hana://user:pass123@hanahost:12345?chopBlanks=true&chopBlanksInput=true",
+            ),
+            (
+                {"validateCertificate": True, "chopBlanks": False},
+                "hana://user:pass123@hanahost:12345?chopBlanks=False&validateCertificate=True",
             ),
         ],
+        indirect=["mock_connection"],
     )
-    def test_sqlalchemy_url_with_extra(self, extra, expected_sqlalchemy_url, mock_connection):
-        mock_connection.extra = extra
+    def test_sqlalchemy_url_with_extra(self, mock_connection, expected_sqlalchemy_url):
         hook = SapHanaHook()
         hook.get_connection = mock.Mock(return_value=mock_connection)
         assert hook.sqlalchemy_url.render_as_string(False) == expected_sqlalchemy_url
@@ -91,17 +95,17 @@ class TestSapHanaHookConnection:
         assert replace_stmt == expected_replace_stmt
 
     @pytest.mark.parametrize(
-        "extra, called_with_args",
+        "mock_connection, called_with_args",
         [
             (
-                '{"databasename": "mock", "chopblanks": "true", "chopblanksinput": "true"}',
+                '{"databaseName": "mock", "chopBlanks": "true", "chopBlanksInput": "true"}',
                 {
                     "address": "hanahost",
                     "user": "user",
                     "password": "pass123",
                     "port": 12345,
-                    "chopblanks": "true",
-                    "chopblanksinput": "true",
+                    "chopBlanks": "true",
+                    "chopBlanksInput": "true",
                 },
             ),
             (
@@ -114,10 +118,10 @@ class TestSapHanaHookConnection:
                 },
             ),
         ],
+        indirect=["mock_connection"],
     )
     @mock.patch("airflow_provider_sap_hana.hooks.hana.hdbcli.dbapi.connect")
-    def test_get_conn(self, mock_connect, extra, called_with_args, mock_connection):
-        mock_connection.extra = extra
+    def test_get_conn(self, mock_connect, called_with_args, mock_connection):
         hook = SapHanaHook()
         hook.get_connection = mock.Mock(return_value=mock_connection)
 
@@ -135,7 +139,7 @@ class TestSapHanaHookConnection:
                     "user": "user",
                     "password": "pass123",
                     "port": 12345,
-                    "databasename": "hook_database",
+                    "databaseName": "hook_database",
                 },
             ),
             (
@@ -146,7 +150,7 @@ class TestSapHanaHookConnection:
                     "user": "user",
                     "password": "pass123",
                     "port": 12345,
-                    "databasename": "connection_database",
+                    "databaseName": "connection_database",
                 },
             ),
             (
@@ -184,7 +188,7 @@ class TestSapHanaHookConnection:
     def test_get_conn_with_log_messaging(
         self, mock_connect, enable_db_log_messages, extra, called_with_args, mock_connection, mock_conn
     ):
-        mock_connection.extra = extra
+        mock_connection.set_extra(extra)
         hook = SapHanaHook(enable_db_log_messages=enable_db_log_messages)
         hook.get_connection = mock.Mock(return_value=mock_connection)
         mock_connect.return_value = mock_conn

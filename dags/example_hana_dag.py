@@ -1,20 +1,20 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-import os
 import csv
+import os
+from typing import TYPE_CHECKING
 
 from faker import Faker
 from faker.providers import automotive, person
 from pendulum import datetime
 
-from airflow.sdk import dag, task, ObjectStoragePath
-from airflow.providers.standard.operators.empty import EmptyOperator
 from airflow.providers.common.sql.operators.sql import (
     BranchSQLOperator,
     SQLExecuteQueryOperator,
     SQLInsertRowsOperator,
 )
+from airflow.providers.standard.operators.empty import EmptyOperator
+from airflow.sdk import ObjectStoragePath, dag, task
 
 if TYPE_CHECKING:
     from airflow.models.xcom import LazySelectSequence

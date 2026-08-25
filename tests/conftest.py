@@ -12,7 +12,8 @@ from airflow_provider_sap_hana.hooks.hana import SapHanaHook
 
 
 @pytest.fixture
-def mock_connection():
+def mock_connection(request):
+    extra_val = getattr(request, "param", None)
     return Connection(
         conn_type="hana",
         conn_id="hana_mock",
@@ -20,6 +21,7 @@ def mock_connection():
         login="user",
         password="pass123",
         port=12345,
+        extra=extra_val,
     )
 
 
